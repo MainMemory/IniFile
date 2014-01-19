@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
 using IniDictionary = System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>>;
 using IniGroup = System.Collections.Generic.Dictionary<string, string>;
@@ -10,16 +12,15 @@ namespace IniFile
 {
     public static class IniFile
     {
-        public static IniDictionary Load(string filename)
+        public static IniDictionary Load(params string[] data)
         {
             IniDictionary result = new IniDictionary();
             IniGroup curent = new IniGroup();
             result.Add(string.Empty, curent);
             string curgroup = string.Empty;
-            string[] fc = System.IO.File.ReadAllLines(filename);
-            for (int i = 0; i < fc.Length; i++)
+            for (int i = 0; i < data.Length; i++)
             {
-                string line = fc[i];
+                string line = data[i];
                 StringBuilder sb = new StringBuilder(line.Length);
                 bool startswithbracket = false;
                 int firstequals = -1;
@@ -72,7 +73,7 @@ namespace IniFile
                     }
                     catch (ArgumentException ex)
                     {
-                        throw new Exception("INI File error: Group \"" + curgroup + "\" already exists.\n" + filename + ":line " + i, ex);
+                        throw new Exception("INI File error: Group \"" + curgroup + "\" already exists.\nline " + (i + 1), ex);
                     }
                 }
                 else if (!IsNullOrWhiteSpace(line))
@@ -92,14 +93,28 @@ namespace IniFile
                     }
                     catch (ArgumentException ex)
                     {
-                        throw new Exception("INI File error: Value \"" + key + "\" already exists in group \"" + curgroup + "\".\n" + filename + ":line " + i, ex);
+                        throw new Exception("INI File error: Value \"" + key + "\" already exists in group \"" + curgroup + "\".\nline " + (i + 1), ex);
                     }
                 }
             }
             return result;
         }
 
-        public static void Save(IniDictionary INI, string filename)
+        public static IniDictionary Load(string filename) { return Load(File.ReadAllLines(filename)); }
+
+        public static IniDictionary Load(IEnumerable<string> data) { return Load(data.ToArray()); }
+
+        public static IniDictionary Load(Stream stream)
+        {
+            List<string> data = new List<string>();
+            StreamReader reader = new StreamReader(stream);
+            string line;
+            while ((line = reader.ReadLine()) != null)
+                data.Add(line);
+            return Load(data.ToArray());
+        }
+
+        public static string[] Save(IniDictionary INI)
         {
             List<string> result = new List<string>();
             foreach (IniNameGroup group in INI)
@@ -114,7 +129,16 @@ namespace IniFile
                     result.Add(escapedkey + "=" + value.Value.Replace(@"\", @"\\").Replace("\n", @"\n").Replace("\r", @"\r").Replace(";", @"\;"));
                 }
             }
-            System.IO.File.WriteAllLines(filename, result.ToArray());
+            return result.ToArray();
+        }
+
+        public static void Save(IniDictionary INI, string filename) { File.WriteAllLines(filename, Save(INI)); }
+
+        public static void Save(IniDictionary INI, Stream stream)
+        {
+            StreamWriter writer = new StreamWriter(stream);
+            foreach (string line in Save(INI))
+                writer.WriteLine(line);
         }
 
         public static IniDictionary Combine(IniDictionary dictA, IniDictionary dictB)
