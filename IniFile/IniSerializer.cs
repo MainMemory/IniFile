@@ -242,11 +242,17 @@ namespace IniFile
 								}
 							break;
 						case IniCollectionMode.SingleLine:
-							string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
-							Array _obj = Array.CreateInstance(valuetype, items.Length);
-							for (int i = 0; i < items.Length; i++)
-								_obj.SetValue(valuetype.ConvertFromString(items[i]), i);
-							group.Remove(name);
+							if (group.ContainsKey(name))
+							{
+								string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
+								Array _obj = Array.CreateInstance(valuetype, items.Length);
+								for (int i = 0; i < items.Length; i++)
+									_obj.SetValue(valuetype.ConvertFromString(items[i]), i);
+								group.Remove(name);
+								return _obj;
+							}
+							else
+								return null;
 							break;
 					}
 				}
@@ -419,7 +425,7 @@ namespace IniFile
 						setmethod.Invoke(result, new object[] { propval });
 						break;
 				}
-			ini.Remove(rootObject ? string.Empty : name);
+			ini.Remove(fullname);
 			return result;
 		}
 
@@ -584,10 +590,13 @@ namespace IniFile
 								}
 							break;
 						case IniCollectionMode.SingleLine:
-							string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
-							for (int i = 0; i < items.Length; i++)
-								list.Add((T)valuetype.ConvertFromString(items[i]));
-							group.Remove(name);
+							if (group.ContainsKey(name))
+							{
+								string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
+								for (int i = 0; i < items.Length; i++)
+									list.Add((T)valuetype.ConvertFromString(items[i]));
+								group.Remove(name);
+							}
 							break;
 					}
 				}
