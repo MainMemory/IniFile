@@ -15,10 +15,14 @@ namespace IniFile
 		private static readonly IniCollectionSettings initialCollectionSettings = new IniCollectionSettings(IniCollectionMode.IndexOnly);
 		private static readonly IniCollectionSettings defaultCollectionSettings = new IniCollectionSettings(IniCollectionMode.Normal);
 
-
 		public static void Serialize(object Object, string Filename)
 		{
 			IniFile.Save(Serialize(Object), Filename);
+		}
+
+		public static void Serialize(object Object, TypeConverter Converter, string Filename)
+		{
+			IniFile.Save(Serialize(Object, Converter), Filename);
 		}
 
 		public static void Serialize(object Object, IniCollectionSettings CollectionSettings, string Filename)
@@ -26,25 +30,40 @@ namespace IniFile
 			IniFile.Save(Serialize(Object, CollectionSettings), Filename);
 		}
 
+		public static void Serialize(object Object, IniCollectionSettings CollectionSettings, TypeConverter Converter, string Filename)
+		{
+			IniFile.Save(Serialize(Object, CollectionSettings, Converter), Filename);
+		}
+
 		public static IniDictionary Serialize(object Object)
 		{
-			return Serialize(Object, initialCollectionSettings);
+			return Serialize(Object, initialCollectionSettings, (TypeConverter)null);
+		}
+
+		public static IniDictionary Serialize(object Object, TypeConverter Converter)
+		{
+			return Serialize(Object, initialCollectionSettings, Converter);
 		}
 
 		public static IniDictionary Serialize(object Object, IniCollectionSettings CollectionSettings)
 		{
+			return Serialize(Object, CollectionSettings, (TypeConverter)null);
+		}
+
+		public static IniDictionary Serialize(object Object, IniCollectionSettings CollectionSettings, TypeConverter Converter)
+		{
 			IniDictionary ini = new IniDictionary() { { string.Empty, new IniGroup() } };
-			SerializeInternal("value", Object, ini, string.Empty, true, CollectionSettings);
+			SerializeInternal("value", Object, ini, string.Empty, true, CollectionSettings, Converter);
 			return ini;
 		}
 
-		private static void SerializeInternal(string name, object value, IniDictionary ini, string groupName, bool rootObject, IniCollectionSettings collectionSettings)
+		private static void SerializeInternal(string name, object value, IniDictionary ini, string groupName, bool rootObject, IniCollectionSettings collectionSettings, TypeConverter converter)
 		{
 			IniGroup group = ini[groupName];
 			if (value == null || value == DBNull.Value) return;
-			if (!value.GetType().IsComplexType())
+			if (!value.GetType().IsComplexType(converter))
 			{
-				group.Add(name, value.ConvertToString());
+				group.Add(name, value.ConvertToString(converter));
 				return;
 			}
 			if (value is IList)
@@ -54,20 +73,20 @@ namespace IniFile
 				{
 					case IniCollectionMode.Normal:
 						foreach (object item in (IList)value)
-							SerializeInternal(name + "[" + (i++).ToString() + "]", item, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal(name + "[" + (i++).ConvertToString(collectionSettings.KeyConverter) + "]", item, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.IndexOnly:
 						foreach (object item in (IList)value)
-							SerializeInternal((i++).ToString(), item, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal((i++).ConvertToString(collectionSettings.KeyConverter), item, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.NoSquareBrackets:
 						foreach (object item in (IList)value)
-							SerializeInternal(name + (i++).ToString(), item, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal(name + (i++).ConvertToString(collectionSettings.KeyConverter), item, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.SingleLine:
 						List<string> line = new List<string>();
 						foreach (object item in (IList)value)
-							line.Add(item.ConvertToString());
+							line.Add(item.ConvertToString(collectionSettings.ValueConverter));
 						group.Add(name, string.Join(collectionSettings.Format, line.ToArray()));
 						return;
 				}
@@ -78,15 +97,15 @@ namespace IniFile
 				{
 					case IniCollectionMode.Normal:
 						foreach (DictionaryEntry item in (IDictionary)value)
-							SerializeInternal(name + "[" + item.Key.ConvertToString() + "]", item.Value, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal(name + "[" + item.Key.ConvertToString(collectionSettings.KeyConverter) + "]", item.Value, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.IndexOnly:
 						foreach (DictionaryEntry item in (IDictionary)value)
-							SerializeInternal(item.Key.ConvertToString(), item.Value, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal(item.Key.ConvertToString(collectionSettings.KeyConverter), item.Value, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.NoSquareBrackets:
 						foreach (DictionaryEntry item in (IDictionary)value)
-							SerializeInternal(name + item.Key.ConvertToString(), item.Value, ini, groupName, false, defaultCollectionSettings);
+							SerializeInternal(name + item.Key.ConvertToString(collectionSettings.KeyConverter), item.Value, ini, groupName, false, defaultCollectionSettings, collectionSettings.ValueConverter);
 						return;
 					case IniCollectionMode.SingleLine:
 						throw new InvalidOperationException("Cannot serialize IDictionary with IniCollectionMode.SingleLine!");
@@ -133,59 +152,103 @@ namespace IniFile
 				if (Attribute.GetCustomAttribute(member, typeof(IniAlwaysIncludeAttribute), true) != null || !object.Equals(item, defval))
 				{
 					IniCollectionSettings settings = defaultCollectionSettings;
-					IniCollectionAttribute attr = (IniCollectionAttribute)Attribute.GetCustomAttribute(member, typeof(IniCollectionAttribute));
-					if (attr != null)
-						settings = attr.Settings;
-					SerializeInternal(membername, item, ini, newgroup, false, settings);
+					IniCollectionAttribute collattr = (IniCollectionAttribute)Attribute.GetCustomAttribute(member, typeof(IniCollectionAttribute));
+					if (collattr != null)
+						settings = collattr.Settings;
+					TypeConverter conv = null;
+					TypeConverterAttribute convattr = (TypeConverterAttribute)Attribute.GetCustomAttribute(member, typeof(TypeConverterAttribute));
+					if (convattr != null)
+						conv = (TypeConverter)Activator.CreateInstance(Type.GetType(convattr.ConverterTypeName));
+					SerializeInternal(membername, item, ini, newgroup, false, settings, conv);
 				}
 			}
 		}
 
 		public static T Deserialize<T>(string filename)
 		{
-			return Deserialize<T>(IniFile.Load(filename));
+			return Deserialize<T>(IniFile.Load(filename), (TypeConverter)null);
+		}
+
+		public static T Deserialize<T>(string filename, TypeConverter Converter)
+		{
+			return Deserialize<T>(IniFile.Load(filename), Converter);
 		}
 
 		public static object Deserialize(Type Type, string Filename)
 		{
-			return Deserialize(Type, IniFile.Load(Filename));
+			return Deserialize(Type, IniFile.Load(Filename), (TypeConverter)null);
+		}
+
+		public static object Deserialize(Type Type, string Filename, TypeConverter Converter)
+		{
+			return Deserialize(Type, IniFile.Load(Filename), Converter);
 		}
 
 		public static T Deserialize<T>(IniDictionary INI)
 		{
-			return (T)Deserialize(typeof(T), INI);
+			return (T)Deserialize(typeof(T), INI, (TypeConverter)null);
+		}
+
+		public static T Deserialize<T>(IniDictionary INI, TypeConverter Converter)
+		{
+			return (T)Deserialize(typeof(T), INI, Converter);
 		}
 
 		public static object Deserialize(Type Type, IniDictionary INI)
 		{
-			return Deserialize(Type, INI, initialCollectionSettings);
+			return Deserialize(Type, INI, initialCollectionSettings, null);
+		}
+
+		public static object Deserialize(Type Type, IniDictionary INI, TypeConverter Converter)
+		{
+			return Deserialize(Type, INI, initialCollectionSettings, Converter);
 		}
 
 		public static T Deserialize<T>(string filename, IniCollectionSettings CollectionSettings)
 		{
-			return Deserialize<T>(IniFile.Load(filename), CollectionSettings);
+			return Deserialize<T>(IniFile.Load(filename), CollectionSettings, null);
+		}
+
+		public static T Deserialize<T>(string filename, IniCollectionSettings CollectionSettings, TypeConverter Converter)
+		{
+			return Deserialize<T>(IniFile.Load(filename), CollectionSettings, Converter);
 		}
 
 		public static object Deserialize(Type Type, string Filename, IniCollectionSettings CollectionSettings)
 		{
-			return Deserialize(Type, IniFile.Load(Filename), CollectionSettings);
+			return Deserialize(Type, IniFile.Load(Filename), CollectionSettings, null);
+		}
+
+		public static object Deserialize(Type Type, string Filename, IniCollectionSettings CollectionSettings, TypeConverter Converter)
+		{
+			return Deserialize(Type, IniFile.Load(Filename), CollectionSettings, Converter);
 		}
 
 		public static T Deserialize<T>(IniDictionary INI, IniCollectionSettings CollectionSettings)
 		{
-			return (T)Deserialize(typeof(T), INI, CollectionSettings);
+			return (T)Deserialize(typeof(T), INI, CollectionSettings, null);
+		}
+
+		public static T Deserialize<T>(IniDictionary INI, IniCollectionSettings CollectionSettings, TypeConverter Converter)
+		{
+			return (T)Deserialize(typeof(T), INI, CollectionSettings, Converter);
 		}
 
 		public static object Deserialize(Type Type, IniDictionary INI, IniCollectionSettings CollectionSettings)
 		{
+			return Deserialize(Type, INI, CollectionSettings, null);
+		}
+
+		public static object Deserialize(Type Type, IniDictionary INI, IniCollectionSettings CollectionSettings, TypeConverter Converter)
+		{
 			object Object;
 			IniDictionary ini = new IniDictionary();
 			ini = IniFile.Combine(ini, INI);
-			Object = DeserializeInternal("value", Type, Type.GetDefaultValue(), ini, string.Empty, true, CollectionSettings);
+			Object = DeserializeInternal("value", Type, Type.GetDefaultValue(), ini, string.Empty, true, CollectionSettings, Converter);
 			return Object;
 		}
 
-		private static object DeserializeInternal(string name, Type type, object defaultvalue, IniDictionary ini, string groupName, bool rootObject, IniCollectionSettings collectionSettings)
+		private static object DeserializeInternal(string name, Type type, object defaultvalue, IniDictionary ini, string groupName, bool rootObject, IniCollectionSettings collectionSettings, TypeConverter converter)
 		{
 			string fullname = groupName;
 			if (!rootObject)
@@ -196,11 +259,11 @@ namespace IniFile
 			}
 			if (!ini.ContainsKey(groupName)) return defaultvalue;
 			Dictionary<string, string> group = ini[groupName];
-			if (!type.IsComplexType())
+			if (!type.IsComplexType(converter))
 			{
 				if (group.ContainsKey(name))
 				{
-					object converted = type.ConvertFromString(group[name]);
+					object converted = type.ConvertFromString(group[name], converter);
 					group.Remove(name);
 					if (converted != null)
 						return converted;
@@ -212,7 +275,8 @@ namespace IniFile
 			{
 				Type valuetype = type.GetElementType();
 				int maxind = int.MinValue;
-				if (!IsComplexType(valuetype))
+				TypeConverter keyconverter = collectionSettings.KeyConverter ?? new Int32Converter();
+				if (!IsComplexType(valuetype, collectionSettings.ValueConverter))
 				{
 					switch (collectionSettings.Mode)
 					{
@@ -220,26 +284,20 @@ namespace IniFile
 							foreach (IniNameValue item in group)
 								if (item.Key.StartsWith(name + "["))
 								{
-									int key = int.Parse(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
+									int key = (int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
 									maxind = Math.Max(key, maxind);
 								}
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameValue item in group)
-							{
-								int key;
-								if (int.TryParse(item.Key, out key))
-									maxind = Math.Max(key, maxind);
-							}
+								if (keyconverter.IsValid(item.Key))
+									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (IniNameValue item in group)
 								if (item.Key.StartsWith(name))
-								{
-									int key;
-									if (int.TryParse(item.Key.Substring(name.Length), out key))
-										maxind = Math.Max(key, maxind);
-								}
+									if (keyconverter.IsValid(item.Key.Substring(name.Length)))
+										maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length)), maxind);
 							break;
 						case IniCollectionMode.SingleLine:
 							if (group.ContainsKey(name))
@@ -247,13 +305,12 @@ namespace IniFile
 								string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
 								Array _obj = Array.CreateInstance(valuetype, items.Length);
 								for (int i = 0; i < items.Length; i++)
-									_obj.SetValue(valuetype.ConvertFromString(items[i]), i);
+									_obj.SetValue(valuetype.ConvertFromString(items[i], collectionSettings.ValueConverter), i);
 								group.Remove(name);
 								return _obj;
 							}
 							else
 								return null;
-							break;
 					}
 				}
 				else
@@ -264,25 +321,20 @@ namespace IniFile
 							foreach (IniNameGroup item in ini)
 								if (item.Key.StartsWith(fullname + "["))
 								{
-									int key = int.Parse(item.Key.Substring(fullname.Length + 1, item.Key.Length - (fullname.Length + 2)));
+									int key = (int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
 									maxind = Math.Max(key, maxind);
 								}
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameGroup item in ini)
-							{
-								int key;
-								if (int.TryParse(item.Key, out key))
-									maxind = Math.Max(key, maxind);
-							}
+								if (keyconverter.IsValid(item.Key))
+									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (IniNameGroup item in ini)
 								if (item.Key.StartsWith(fullname))
-								{
-									int key = int.Parse(item.Key.Substring(fullname.Length));
-									maxind = Math.Max(key, maxind);
-								}
+									if (keyconverter.IsValid(item.Key.Substring(fullname.Length)))
+										maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key.Substring(fullname.Length)), maxind);
 							break;
 						case IniCollectionMode.SingleLine:
 							throw new InvalidOperationException("Cannot deserialize type " + valuetype + " with IniCollectionMode.SingleLine!");
@@ -291,38 +343,47 @@ namespace IniFile
 				if (maxind == int.MinValue) return Array.CreateInstance(valuetype, 0);
 				int length = maxind + 1 - (collectionSettings.Mode == IniCollectionMode.SingleLine ? 0 : collectionSettings.StartIndex);
 				Array obj = Array.CreateInstance(valuetype, length);
-				if (!IsComplexType(valuetype))
+				if (!IsComplexType(valuetype, collectionSettings.ValueConverter))
 					switch (collectionSettings.Mode)
 					{
 						case IniCollectionMode.Normal:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey(name + "[" + (i + collectionSettings.StartIndex).ToString() + "]"))
+							{
+								string keyname = name + "[" + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex) + "]";
+								if (group.ContainsKey(keyname))
 								{
-									obj.SetValue(valuetype.ConvertFromString(group[name + "[" + (i + collectionSettings.StartIndex).ToString() + "]"]), i);
-									group.Remove(name + "[" + (i + collectionSettings.StartIndex).ToString() + "]");
+									obj.SetValue(valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter), i);
+									group.Remove(keyname);
 								}
 								else
 									obj.SetValue(valuetype.GetDefaultValue(), i);
+							}
 							break;
 						case IniCollectionMode.IndexOnly:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey((i + collectionSettings.StartIndex).ToString()))
+							{
+								string keyname = keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex);
+								if (group.ContainsKey(keyname))
 								{
-									obj.SetValue(valuetype.ConvertFromString(group[(i + collectionSettings.StartIndex).ToString()]), i);
-									group.Remove((i + collectionSettings.StartIndex).ToString());
+									obj.SetValue(valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter), i);
+									group.Remove(keyname);
 								}
 								else
 									obj.SetValue(valuetype.GetDefaultValue(), i);
+							}
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey(name + (i + collectionSettings.StartIndex).ToString()))
+							{
+								string keyname = name + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex);
+								if (group.ContainsKey(keyname))
 								{
-									obj.SetValue(valuetype.ConvertFromString(group[name + (i + collectionSettings.StartIndex).ToString()]), i);
-									group.Remove(name + (i + collectionSettings.StartIndex).ToString());
+									obj.SetValue(valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter), i);
+									group.Remove(keyname);
 								}
 								else
 									obj.SetValue(valuetype.GetDefaultValue(), i);
+							}
 							break;
 					}
 				else
@@ -330,15 +391,15 @@ namespace IniFile
 					{
 						case IniCollectionMode.Normal:
 							for (int i = 0; i < length; i++)
-								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + "[" + (i + collectionSettings.StartIndex).ToString() + "]", true, defaultCollectionSettings), i);
+								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + "[" + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex) + "]", true, defaultCollectionSettings, collectionSettings.ValueConverter), i);
 							break;
 						case IniCollectionMode.IndexOnly:
 							for (int i = 0; i < length; i++)
-								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, (i + collectionSettings.StartIndex).ToString(), true, defaultCollectionSettings), i);
+								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex), true, defaultCollectionSettings, collectionSettings.ValueConverter), i);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							for (int i = 0; i < length; i++)
-								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + (i + collectionSettings.StartIndex).ToString(), true, defaultCollectionSettings), i);
+								obj.SetValue(DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex), true, defaultCollectionSettings, collectionSettings.ValueConverter), i);
 							break;
 					}
 				return obj;
@@ -356,7 +417,7 @@ namespace IniFile
 				object obj = Activator.CreateInstance(type);
 				Type keytype = generictype.GetGenericArguments()[0];
 				Type valuetype = generictype.GetGenericArguments()[1];
-				if (keytype.IsComplexType()) return obj;
+				if (keytype.IsComplexType(collectionSettings.KeyConverter)) return obj;
 				CollectionDeserializer deserializer = (CollectionDeserializer)Activator.CreateInstance(typeof(DictionaryDeserializer<,>).MakeGenericType(keytype, valuetype));
 				deserializer.Deserialize(obj, group, groupName, collectionSettings, name, ini, fullname);
 				return obj;
@@ -374,6 +435,10 @@ namespace IniFile
 				IniCollectionAttribute colattr = (IniCollectionAttribute)Attribute.GetCustomAttribute(member, typeof(IniCollectionAttribute), true);
 				if (colattr != null)
 					colset = colattr.Settings;
+				TypeConverter conv = null;
+				TypeConverterAttribute convattr = (TypeConverterAttribute)Attribute.GetCustomAttribute(member, typeof(TypeConverterAttribute), true);
+				if (convattr != null)
+					conv = (TypeConverter)Activator.CreateInstance(Type.GetType(convattr.ConverterTypeName));
 				switch (member.MemberType)
 				{
 					case MemberTypes.Field:
@@ -388,7 +453,7 @@ namespace IniFile
 						DefaultValueAttribute defattr = (DefaultValueAttribute)Attribute.GetCustomAttribute(member, typeof(DefaultValueAttribute), true);
 						if (defattr != null)
 							defval = defattr.Value;
-						field.SetValue(result, DeserializeInternal(membername, field.FieldType, defval, ini, fullname, false, colset));
+						field.SetValue(result, DeserializeInternal(membername, field.FieldType, defval, ini, fullname, false, colset, conv));
 						break;
 					case MemberTypes.Property:
 						PropertyInfo property = (PropertyInfo)member;
@@ -403,7 +468,7 @@ namespace IniFile
 						defattr = (DefaultValueAttribute)Attribute.GetCustomAttribute(member, typeof(DefaultValueAttribute), true);
 						if (defattr != null)
 							defval = defattr.Value;
-						object propval = DeserializeInternal(membername, property.PropertyType, defval, ini, fullname, false, colset);
+						object propval = DeserializeInternal(membername, property.PropertyType, defval, ini, fullname, false, colset, conv);
 						MethodInfo setmethod = property.GetSetMethod();
 						if (setmethod == null) continue;
 						setmethod.Invoke(result, new object[] { propval });
@@ -415,11 +480,11 @@ namespace IniFile
 				{
 					case MemberTypes.Field:
 						FieldInfo field = (FieldInfo)collection;
-						field.SetValue(result, DeserializeInternal(collection.Name, field.FieldType, field.FieldType.GetDefaultValue(), ini, fullname, false, ((IniCollectionAttribute)Attribute.GetCustomAttribute(collection, typeof(IniCollectionAttribute), true)).Settings));
+						field.SetValue(result, DeserializeInternal(collection.Name, field.FieldType, field.FieldType.GetDefaultValue(), ini, fullname, false, ((IniCollectionAttribute)Attribute.GetCustomAttribute(collection, typeof(IniCollectionAttribute), true)).Settings, null));
 						break;
 					case MemberTypes.Property:
 						PropertyInfo property = (PropertyInfo)collection;
-						object propval = DeserializeInternal(collection.Name, property.PropertyType, property.PropertyType.GetDefaultValue(), ini, fullname, false, ((IniCollectionAttribute)Attribute.GetCustomAttribute(collection, typeof(IniCollectionAttribute), true)).Settings);
+						object propval = DeserializeInternal(collection.Name, property.PropertyType, property.PropertyType.GetDefaultValue(), ini, fullname, false, ((IniCollectionAttribute)Attribute.GetCustomAttribute(collection, typeof(IniCollectionAttribute), true)).Settings, null);
 						MethodInfo setmethod = property.GetSetMethod();
 						if (setmethod == null) break;
 						setmethod.Invoke(result, new object[] { propval });
@@ -476,12 +541,13 @@ namespace IniFile
 			}
 		}
 
-		private static bool IsComplexType(this Type type)
+		private static bool IsComplexType(this Type type, TypeConverter converter)
 		{
 			switch (Type.GetTypeCode(type))
 			{
 				case TypeCode.Object:
-					TypeConverter converter = TypeDescriptor.GetConverter(type);
+					if (converter == null)
+						converter = TypeDescriptor.GetConverter(type);
 					if (converter != null && !(converter is ComponentConverter) && converter.GetType() != typeof(TypeConverter))
 						if (converter.CanConvertTo(typeof(string)) & converter.CanConvertFrom(typeof(string)))
 							return false;
@@ -493,11 +559,12 @@ namespace IniFile
 			}
 		}
 
-		private static string ConvertToString(this object @object)
+		private static string ConvertToString(this object @object, TypeConverter converter)
 		{
 			if (@object is string) return (string)@object;
 			if (@object is Enum) return @object.ToString();
-			TypeConverter converter = TypeDescriptor.GetConverter(@object);
+			if (converter == null)
+				converter = TypeDescriptor.GetConverter(@object);
 			if (converter != null && !(converter is ComponentConverter) && converter.GetType() != typeof(TypeConverter))
 				if (converter.CanConvertTo(typeof(string)))
 					return converter.ConvertToInvariantString(@object);
@@ -506,9 +573,10 @@ namespace IniFile
 			return null;
 		}
 
-		private static object ConvertFromString(this Type type, string value)
+		private static object ConvertFromString(this Type type, string value, TypeConverter converter)
 		{
-			TypeConverter converter = TypeDescriptor.GetConverter(type);
+			if (converter == null)
+				converter = TypeDescriptor.GetConverter(type);
 			if (converter != null && !(converter is ComponentConverter) && converter.GetType() != typeof(TypeConverter))
 				if (converter.CanConvertFrom(typeof(string)))
 					return converter.ConvertFromInvariantString(value);
@@ -560,7 +628,8 @@ namespace IniFile
 				Type valuetype = typeof(T);
 				IList<T> list = (IList<T>)listObj;
 				int maxind = int.MinValue;
-				if (!IsComplexType(valuetype))
+				TypeConverter keyconverter = collectionSettings.KeyConverter ?? new Int32Converter();
+				if (!IsComplexType(valuetype, collectionSettings.ValueConverter))
 				{
 					switch (collectionSettings.Mode)
 					{
@@ -568,33 +637,27 @@ namespace IniFile
 							foreach (IniNameValue item in group)
 								if (item.Key.StartsWith(name + "["))
 								{
-									int key = int.Parse(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
+									int key = (int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
 									maxind = Math.Max(key, maxind);
 								}
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameValue item in group)
-							{
-								int key;
-								if (int.TryParse(item.Key, out key))
-									maxind = Math.Max(key, maxind);
-							}
+								if (keyconverter.IsValid(item.Key))
+									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (IniNameValue item in group)
 								if (item.Key.StartsWith(name))
-								{
-									int key;
-									if (int.TryParse(item.Key.Substring(name.Length), out key))
-										maxind = Math.Max(key, maxind);
-								}
+									if (keyconverter.IsValid(item.Key.Substring(name.Length)))
+										maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length)), maxind);
 							break;
 						case IniCollectionMode.SingleLine:
 							if (group.ContainsKey(name))
 							{
 								string[] items = group[name].Split(new[] { collectionSettings.Format }, StringSplitOptions.None);
 								for (int i = 0; i < items.Length; i++)
-									list.Add((T)valuetype.ConvertFromString(items[i]));
+									list.Add((T)valuetype.ConvertFromString(items[i], collectionSettings.ValueConverter));
 								group.Remove(name);
 							}
 							break;
@@ -608,25 +671,20 @@ namespace IniFile
 							foreach (IniNameGroup item in ini)
 								if (item.Key.StartsWith(fullname + "["))
 								{
-									int key = int.Parse(item.Key.Substring(fullname.Length + 1, item.Key.Length - (fullname.Length + 2)));
+									int key = (int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length + 1, item.Key.Length - (name.Length + 2)));
 									maxind = Math.Max(key, maxind);
 								}
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameGroup item in ini)
-							{
-								int key;
-								if (int.TryParse(item.Key, out key))
-									maxind = Math.Max(key, maxind);
-							}
+								if (keyconverter.IsValid(item.Key))
+									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (IniNameGroup item in ini)
 								if (item.Key.StartsWith(fullname))
-								{
-									int key = int.Parse(item.Key.Substring(fullname.Length));
-									maxind = Math.Max(key, maxind);
-								}
+									if (keyconverter.IsValid(item.Key.Substring(name.Length)))
+										maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key.Substring(name.Length)), maxind);
 							break;
 						case IniCollectionMode.SingleLine:
 							throw new InvalidOperationException("Cannot deserialize type " + valuetype + " with IniCollectionMode.SingleLine!");
@@ -634,38 +692,47 @@ namespace IniFile
 				}
 				if (maxind == int.MinValue) return;
 				int length = maxind + 1 - (collectionSettings.Mode == IniCollectionMode.SingleLine ? 0 : collectionSettings.StartIndex);
-				if (!IsComplexType(valuetype))
+				if (!IsComplexType(valuetype, collectionSettings.ValueConverter))
 					switch (collectionSettings.Mode)
 					{
 						case IniCollectionMode.Normal:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey(name + "[" + (i + collectionSettings.StartIndex).ToString() + "]"))
+							{
+								string keyname = name + "[" + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex) + "]";
+								if (group.ContainsKey(keyname))
 								{
-									list.Add((T)valuetype.ConvertFromString(group[name + "[" + (i + collectionSettings.StartIndex).ToString() + "]"]));
-									group.Remove(name + "[" + (i + collectionSettings.StartIndex).ToString() + "]");
+									list.Add((T)valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter));
+									group.Remove(keyname);
 								}
 								else
 									list.Add((T)valuetype.GetDefaultValue());
+							}
 							break;
 						case IniCollectionMode.IndexOnly:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey((i + collectionSettings.StartIndex).ToString()))
+							{
+								string keyname = keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex);
+								if (group.ContainsKey(keyname))
 								{
-									list.Add((T)valuetype.ConvertFromString(group[(i + collectionSettings.StartIndex).ToString()]));
-									group.Remove((i + collectionSettings.StartIndex).ToString());
+									list.Add((T)valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter));
+									group.Remove(keyname);
 								}
 								else
 									list.Add((T)valuetype.GetDefaultValue());
+							}
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							for (int i = 0; i < length; i++)
-								if (group.ContainsKey(name + (i + collectionSettings.StartIndex).ToString()))
+							{
+								string keyname = name + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex);
+								if (group.ContainsKey(keyname))
 								{
-									list.Add((T)valuetype.ConvertFromString(group[name + (i + collectionSettings.StartIndex).ToString()]));
-									group.Remove(name + (i + collectionSettings.StartIndex).ToString());
+									list.Add((T)valuetype.ConvertFromString(group[keyname], collectionSettings.ValueConverter));
+									group.Remove(keyname);
 								}
 								else
 									list.Add((T)valuetype.GetDefaultValue());
+							}
 							break;
 					}
 				else
@@ -673,15 +740,15 @@ namespace IniFile
 					{
 						case IniCollectionMode.Normal:
 							for (int i = 0; i < length; i++)
-								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + "[" + (i + collectionSettings.StartIndex).ToString() + "]", true, defaultCollectionSettings));
+								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + "[" + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex) + "]", true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 						case IniCollectionMode.IndexOnly:
 							for (int i = 0; i < length; i++)
-								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, (i + collectionSettings.StartIndex).ToString(), true, defaultCollectionSettings));
+								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex), true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							for (int i = 0; i < length; i++)
-								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + (i + collectionSettings.StartIndex).ToString(), true, defaultCollectionSettings));
+								list.Add((T)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, fullname + keyconverter.ConvertToInvariantString(i + collectionSettings.StartIndex).ToString(), true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 					}
 			}
@@ -694,7 +761,7 @@ namespace IniFile
 				Type keytype = typeof(TKey);
 				Type valuetype = typeof(TValue);
 				IDictionary<TKey, TValue> list = (IDictionary<TKey, TValue>)listObj;
-				if (!valuetype.IsComplexType())
+				if (!valuetype.IsComplexType(collectionSettings.ValueConverter))
 				{
 					List<string> items = new List<string>();
 					switch (collectionSettings.Mode)
@@ -721,21 +788,21 @@ namespace IniFile
 						case IniCollectionMode.Normal:
 							foreach (string item in items)
 							{
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)valuetype.ConvertFromString(group[name + "[" + item + "]"]));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)valuetype.ConvertFromString(group[name + "[" + item + "]"], collectionSettings.ValueConverter));
 								group.Remove(name + "[" + item + "]");
 							}
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (string item in items)
 							{
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)valuetype.ConvertFromString(group[item]));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)valuetype.ConvertFromString(group[item], collectionSettings.ValueConverter));
 								group.Remove(item);
 							}
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (string item in items)
 							{
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)valuetype.ConvertFromString(group[name + item]));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)valuetype.ConvertFromString(group[name + item], collectionSettings.ValueConverter));
 								group.Remove(name + item);
 							}
 							break;
@@ -768,15 +835,15 @@ namespace IniFile
 					{
 						case IniCollectionMode.Normal:
 							foreach (string item in items)
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, name + "[" + item + "]", true, defaultCollectionSettings));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, name + "[" + item + "]", true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (string item in items)
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, item, true, defaultCollectionSettings));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, item, true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 						case IniCollectionMode.NoSquareBrackets:
 							foreach (string item in items)
-								list.Add((TKey)keytype.ConvertFromString(item), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, name + item, true, defaultCollectionSettings));
+								list.Add((TKey)keytype.ConvertFromString(item, collectionSettings.KeyConverter), (TValue)DeserializeInternal("value", valuetype, valuetype.GetDefaultValue(), ini, name + item, true, defaultCollectionSettings, collectionSettings.ValueConverter));
 							break;
 					}
 				}
@@ -798,7 +865,20 @@ namespace IniFile
 
 		public string Format { get; set; }
 
+		/// <summary>
+		/// The index of the first item in the collection. Does not apply to Dictionary objects or <see cref="IniCollectionMode.SingleLine"/>.
+		/// </summary>
 		public int StartIndex { get; set; }
+
+		/// <summary>
+		/// A <see cref="System.ComponentModel.TypeConverter"/> used to convert indexes/keys to and from <see cref="System.String"/>.
+		/// </summary>
+		public TypeConverter KeyConverter { get; set; }
+
+		/// <summary>
+		/// A <see cref="System.ComponentModel.TypeConverter"/> used to convert values to and from <see cref="System.String"/>.
+		/// </summary>
+		public TypeConverter ValueConverter { get; set; }
 	}
 
 	public enum IniCollectionMode
@@ -835,10 +915,31 @@ namespace IniFile
 			set { Settings.Format = value; }
 		}
 
+		/// <summary>
+		/// The index of the first item in the collection. Does not apply to Dictionary objects or <see cref="IniCollectionMode.SingleLine"/>.
+		/// </summary>
 		public int StartIndex
 		{
 			get { return Settings.StartIndex; }
 			set { Settings.StartIndex = value; }
+		}
+
+		/// <summary>
+		/// The <see cref="System.Type"/> of a <see cref="System.ComponentModel.TypeConverter"/> used to convert indexes/keys to and from <see cref="System.String"/>.
+		/// </summary>
+		public Type KeyConverter
+		{
+			get { return Settings.KeyConverter == null ? null : Settings.KeyConverter.GetType(); }
+			set { Settings.KeyConverter = (TypeConverter)Activator.CreateInstance(value); }
+		}
+
+		/// <summary>
+		/// The <see cref="System.Type"/> of a <see cref="System.ComponentModel.TypeConverter"/> used to convert values to and from <see cref="System.String"/>.
+		/// </summary>
+		public Type ValueConverter
+		{
+			get { return Settings.ValueConverter == null ? null : Settings.ValueConverter.GetType(); }
+			set { Settings.ValueConverter = (TypeConverter)Activator.CreateInstance(value); }
 		}
 
 		public IniCollectionSettings Settings { get; private set; }
