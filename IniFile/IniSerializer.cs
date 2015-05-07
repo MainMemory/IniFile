@@ -327,7 +327,7 @@ namespace IniFile
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameGroup item in ini)
-								if (keyconverter.IsValid(item.Key))
+								if (!string.IsNullOrEmpty(item.Key) && keyconverter.IsValid(item.Key))
 									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
@@ -677,7 +677,7 @@ namespace IniFile
 							break;
 						case IniCollectionMode.IndexOnly:
 							foreach (IniNameGroup item in ini)
-								if (keyconverter.IsValid(item.Key))
+								if (!string.IsNullOrEmpty(item.Key) && keyconverter.IsValid(item.Key))
 									maxind = Math.Max((int)keyconverter.ConvertFromInvariantString(item.Key), maxind);
 							break;
 						case IniCollectionMode.NoSquareBrackets:
